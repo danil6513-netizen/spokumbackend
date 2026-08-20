@@ -4,7 +4,6 @@ import sqlite3
 import bcrypt
 import jwt
 import datetime
-import re
 import os
 
 app = Flask(__name__)
@@ -22,7 +21,6 @@ SECRET_KEY = "spokum_secret_2026"
 def init_db():
     if os.path.exists('social.db'):
         os.remove('social.db')
-        print("🗑️ Старая база удалена")
     
     conn = sqlite3.connect('social.db')
     cursor = conn.cursor()
@@ -43,47 +41,10 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             text TEXT,
-            mood TEXT DEFAULT '·',
             time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            from_user TEXT NOT NULL,
-            to_user TEXT NOT NULL,
-            text TEXT NOT NULL,
-            time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            read BOOLEAN DEFAULT 0
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS likes (
-            post_id INTEGER,
-            user_id INTEGER,
-            PRIMARY KEY (post_id, user_id),
-            FOREIGN KEY (post_id) REFERENCES posts(id),
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    ''')
-    
-    alex_hash = bcrypt.hashpw("alex123".encode(), bcrypt.gensalt())
-    marina_hash = bcrypt.hashpw("marina123".encode(), bcrypt.gensalt())
-    
-    cursor.execute(
-        "INSERT INTO users (username, password_hash, display_name, email) VALUES (?, ?, ?, ?)",
-        ["alex", alex_hash, "Алекс", "alex@example.com"]
-    )
-    cursor.execute(
-        "INSERT INTO users (username, password_hash, display_name, email) VALUES (?, ?, ?, ?)",
-        ["marina", marina_hash, "Марина", "marina@example.com"]
-    )
-    
-    cursor.execute("INSERT INTO posts (user_id, text, mood) VALUES (?, ?, ?)", [1, "тишина — это тоже голос", "·"])
-    cursor.execute("INSERT INTO posts (user_id, text, mood) VALUES (?, ?, ?)", [2, "заметил, как дышит ветер", "◌"])
     
     conn.commit()
     conn.close()
@@ -113,28 +74,19 @@ def get_user_by_username(username):
     conn.close()
     return user
 
-# ---- РЕГИСТРАЦИЯ (БЕЗ ВАЛИДАЦИИ) ----
-@app.route('/api/register', methods=['POST', 'OPTIONS'])
+@app.route('/api/register', methods=['POST'])
 def register():
-    if request.method == 'OPTIONS':
-        return jsonify({}), 200
-    
     data = request.json
     username = data.get('username', '').strip().lower()
     password = data.get('password', '')
     display_name = data.get('display_name', username)
-    email = data.get('email', 'test@test.ru')
+    email = data.get('email', '')
     
     if not username or not password:
-        return jsonify({"success": False, "message": "Заполните имя и пароль"})
+        return jsonify({"success": False, "message": "Заполните все поля"})
     
     if len(password) < 8:
         return jsonify({"success": False, "message": "Пароль минимум 8 символов"})
-    
-    # Юзернейм чистим от пробелов и спецсимволов
-    username = re.sub(r'[^a-zA-Z0-9_]', '', username)
-    if not username:
-        return jsonify({"success": False, "message": "Юзернейм только латиница"})
     
     conn = sqlite3.connect('social.db')
     cursor = conn.cursor()
@@ -143,7 +95,7 @@ def register():
         password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
         cursor.execute(
             "INSERT INTO users (username, password_hash, display_name, email) VALUES (?, ?, ?, ?)",
-            [username, password_hash, display_name, email]
+            [username, password_hash, display_name, email or '']
         )
         conn.commit()
         conn.close()
@@ -152,20 +104,16 @@ def register():
         conn.close()
         return jsonify({"success": False, "message": "Пользователь уже существует"})
 
-# ---- ВХОД ----
-@app.route('/api/login', methods=['POST', 'OPTIONS'])
+@app.route('/api/login', methods=['POST'])
 def login():
-    if request.method == 'OPTIONS':
-        return jsonify({}), 200
-    
     data = request.json
-    login = data.get('login', '').strip().lower()
+    username = data.get('login', '').strip().lower()
     password = data.get('password', '')
     
-    if not login or not password:
+    if not username or not password:
         return jsonify({"success": False, "message": "Заполните все поля"})
     
-    user = get_user_by_username(login)
+    user = get_user_by_username(username)
     
     if not user:
         return jsonify({"success": False, "message": "Пользователь не найден"})
@@ -193,13 +141,12 @@ def login():
         }
     })
 
-# ---- ПОСТЫ (GET) ----
 @app.route('/api/posts', methods=['GET'])
 def get_posts():
     conn = sqlite3.connect('social.db')
     cursor = conn.cursor()
     posts = cursor.execute('''
-        SELECT users.username, users.display_name, posts.text, posts.mood, posts.time, posts.id
+        SELECT users.username, users.display_name, posts.text, posts.time, posts.id
         FROM posts 
         JOIN users ON posts.user_id = users.id 
         ORDER BY posts.time DESC
@@ -212,19 +159,14 @@ def get_posts():
             "username": p[0],
             "display_name": p[1],
             "text": p[2],
-            "mood": p[3] or '·',
-            "time": p[4],
-            "id": p[5],
+            "time": p[3],
+            "id": p[4],
             "likes": 0
         })
     return jsonify(result)
 
-# ---- ПОСТЫ (CREATE) ----
-@app.route('/api/posts', methods=['POST', 'OPTIONS'])
+@app.route('/api/posts', methods=['POST'])
 def create_post():
-    if request.method == 'OPTIONS':
-        return jsonify({}), 200
-    
     token = request.headers.get('Authorization')
     if not token:
         return jsonify({"success": False, "message": "Не авторизован"})
@@ -236,7 +178,6 @@ def create_post():
     
     data = request.json
     text = data.get('text', '')
-    mood = data.get('mood', '·')
     
     if not text:
         return jsonify({"success": False, "message": "Напишите что-нибудь"})
@@ -244,8 +185,8 @@ def create_post():
     conn = sqlite3.connect('social.db')
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO posts (user_id, text, mood) VALUES (?, ?, ?)",
-        [user[0], text, mood]
+        "INSERT INTO posts (user_id, text) VALUES (?, ?)",
+        [user[0], text]
     )
     conn.commit()
     conn.close()
@@ -256,9 +197,4 @@ if __name__ == '__main__':
     init_db()
     print("🚀 Сервер запущен на http://localhost:5000")
     print("📡 API доступны по адресу http://localhost:5000/api/...")
-    print("👤 Тестовые пользователи: alex/alex123, marina/marina123")
-    app.run(host='0.0.0.0', port=5000)
-    print("🚀 Сервер запущен на http://localhost:5000")
-    print("📡 API доступны по адресу http://localhost:5000/api/...")
-    print("👤 Тестовые пользователи: alex/alex123, marina/marina123")
     app.run(host='0.0.0.0', port=5000)
