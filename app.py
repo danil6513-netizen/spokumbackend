@@ -114,46 +114,31 @@ def get_user_by_username(username):
     conn.close()
     return user
 
-# ---- РЕГИСТРАЦИЯ С ПОДРОБНЫМИ ОШИБКАМИ ----
+# ---- РЕГИСТРАЦИЯ (УПРОЩЁННАЯ) ----
 @app.route('/api/register', methods=['POST', 'OPTIONS'])
 def register():
     if request.method == 'OPTIONS':
         return jsonify({}), 200
     
+    data = request.json
+    username = data.get('username', '').strip().lower()
+    password = data.get('password', '')
+    display_name = data.get('display_name', username)
+    email = data.get('email', '')
+    
+    if not username or not password:
+        return jsonify({"success": False, "message": "Заполните все поля"})
+    
+    if len(password) < 8:
+        return jsonify({"success": False, "message": "Пароль минимум 8 символов"})
+    
+    if not re.match(r'^[a-zA-Z0-9_]+$', username):
+        return jsonify({"success": False, "message": "Юзернейм: только латиница, цифры и _"})
+    
+    conn = sqlite3.connect('social.db')
+    cursor = conn.cursor()
+    
     try:
-        data = request.json
-        print("📩 Получены данные:", data)
-        
-        username = data.get('username', '').strip().lower()
-        password = data.get('password', '')
-        display_name = data.get('display_name', username)
-        email = data.get('email', '')
-        
-        # Проверка полей
-        if not username or not password:
-            return jsonify({"success": False, "message": "Заполните все поля"})
-        
-        if len(password) < 8:
-            return jsonify({"success": False, "message": "Пароль минимум 8 символов"})
-        
-        if not re.search(r'[A-Z]', password):
-            return jsonify({"success": False, "message": "Пароль должен содержать заглавную букву"})
-        
-        if not re.search(r'\d', password):
-            return jsonify({"success": False, "message": "Пароль должен содержать цифру"})
-        
-        if not re.match(r'^[a-zA-Z0-9_]+$', username):
-            return jsonify({"success": False, "message": "Юзернейм: только латиница, цифры и _"})
-        
-        conn = sqlite3.connect('social.db')
-        cursor = conn.cursor()
-        
-        # Проверка на существование
-        existing = cursor.execute("SELECT id FROM users WHERE username = ?", [username]).fetchone()
-        if existing:
-            conn.close()
-            return jsonify({"success": False, "message": "Пользователь уже существует"})
-        
         password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
         cursor.execute(
             "INSERT INTO users (username, password_hash, display_name, email) VALUES (?, ?, ?, ?)",
@@ -161,12 +146,10 @@ def register():
         )
         conn.commit()
         conn.close()
-        
         return jsonify({"success": True, "message": "Регистрация успешна!"})
-        
-    except Exception as e:
-        print("❌ Ошибка:", str(e))
-        return jsonify({"success": False, "message": f"Ошибка: {str(e)}"})
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({"success": False, "message": "Пользователь уже существует"})
 
 # ---- ВХОД ----
 @app.route('/api/login', methods=['POST', 'OPTIONS'])
@@ -174,47 +157,42 @@ def login():
     if request.method == 'OPTIONS':
         return jsonify({}), 200
     
-    try:
-        data = request.json
-        login = data.get('login', '').strip().lower()
-        password = data.get('password', '')
-        
-        if not login or not password:
-            return jsonify({"success": False, "message": "Заполните все поля"})
-        
-        user = get_user_by_username(login)
-        
-        if not user:
-            return jsonify({"success": False, "message": "Пользователь не найден"})
-        
-        if not bcrypt.checkpw(password.encode(), user[2]):
-            return jsonify({"success": False, "message": "Неверный пароль"})
-        
-        token = jwt.encode(
-            {
-                "user_id": user[0],
-                "username": user[1],
-                "exp": datetime.datetime.utcnow() + datetime.timedelta(days=7)
-            },
-            SECRET_KEY,
-            algorithm="HS256"
-        )
-        
-        return jsonify({
-            "success": True,
-            "token": token,
-            "user": {
-                "id": user[0],
-                "username": user[1],
-                "display_name": user[3]
-            }
-        })
-        
-    except Exception as e:
-        print("❌ Ошибка входа:", str(e))
-        return jsonify({"success": False, "message": f"Ошибка: {str(e)}"})
+    data = request.json
+    login = data.get('login', '').strip().lower()
+    password = data.get('password', '')
+    
+    if not login or not password:
+        return jsonify({"success": False, "message": "Заполните все поля"})
+    
+    user = get_user_by_username(login)
+    
+    if not user:
+        return jsonify({"success": False, "message": "Пользователь не найден"})
+    
+    if not bcrypt.checkpw(password.encode(), user[2]):
+        return jsonify({"success": False, "message": "Неверный пароль"})
+    
+    token = jwt.encode(
+        {
+            "user_id": user[0],
+            "username": user[1],
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(days=7)
+        },
+        SECRET_KEY,
+        algorithm="HS256"
+    )
+    
+    return jsonify({
+        "success": True,
+        "token": token,
+        "user": {
+            "id": user[0],
+            "username": user[1],
+            "display_name": user[3]
+        }
+    })
 
-# ---- ПОСТЫ ----
+# ---- ПОСТЫ (GET) ----
 @app.route('/api/posts', methods=['GET'])
 def get_posts():
     conn = sqlite3.connect('social.db')
@@ -240,6 +218,7 @@ def get_posts():
         })
     return jsonify(result)
 
+# ---- ПОСТЫ (CREATE) ----
 @app.route('/api/posts', methods=['POST', 'OPTIONS'])
 def create_post():
     if request.method == 'OPTIONS':
@@ -272,74 +251,9 @@ def create_post():
     
     return jsonify({"success": True, "message": "Пост опубликован"})
 
-@app.route('/api/posts/<int:post_id>', methods=['DELETE', 'OPTIONS'])
-def delete_post(post_id):
-    if request.method == 'OPTIONS':
-        return jsonify({}), 200
-    
-    token = request.headers.get('Authorization')
-    if not token:
-        return jsonify({"success": False, "message": "Не авторизован"})
-    
-    token = token.replace('Bearer ', '')
-    user = get_user_by_token(token)
-    if not user:
-        return jsonify({"success": False, "message": "Неверный токен"})
-    
-    conn = sqlite3.connect('social.db')
-    cursor = conn.cursor()
-    post = cursor.execute("SELECT user_id FROM posts WHERE id = ?", [post_id]).fetchone()
-    
-    if not post or post[0] != user[0]:
-        conn.close()
-        return jsonify({"success": False, "message": "Нельзя удалить чужой пост"})
-    
-    cursor.execute("DELETE FROM posts WHERE id = ?", [post_id])
-    conn.commit()
-    conn.close()
-    return jsonify({"success": True, "message": "Пост удалён"})
-
-@app.route('/api/posts/<int:post_id>/like', methods=['POST', 'OPTIONS'])
-def like_post(post_id):
-    if request.method == 'OPTIONS':
-        return jsonify({}), 200
-    
-    token = request.headers.get('Authorization')
-    if not token:
-        return jsonify({"success": False, "message": "Не авторизован"})
-    
-    token = token.replace('Bearer ', '')
-    user = get_user_by_token(token)
-    if not user:
-        return jsonify({"success": False, "message": "Неверный токен"})
-    
-    conn = sqlite3.connect('social.db')
-    cursor = conn.cursor()
-    
-    existing = cursor.execute(
-        "SELECT * FROM likes WHERE post_id = ? AND user_id = ?",
-        [post_id, user[0]]
-    ).fetchone()
-    
-    if existing:
-        cursor.execute(
-            "DELETE FROM likes WHERE post_id = ? AND user_id = ?",
-            [post_id, user[0]]
-        )
-        conn.commit()
-        conn.close()
-        return jsonify({"success": True, "liked": False})
-    else:
-        cursor.execute(
-            "INSERT INTO likes (post_id, user_id) VALUES (?, ?)",
-            [post_id, user[0]]
-        )
-        conn.commit()
-        conn.close()
-        return jsonify({"success": True, "liked": True})
-
 if __name__ == '__main__':
     init_db()
     print("🚀 Сервер запущен на http://localhost:5000")
     print("📡 API доступны по адресу http://localhost:5000/api/...")
+    print("👤 Тестовые пользователи: alex/alex123, marina/marina123")
     app.run(host='0.0.0.0', port=5000)
