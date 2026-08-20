@@ -1,1 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Спокойный Ум</title>
+    <style>
+        body { font-family: Arial; background: #121212; color: #fff; display: flex; justify-content: center; padding: 20px; }
+        .app { max-width: 500px; width: 100%; }
+        .auth-box { background: #1e1c1a; padding: 30px; border-radius: 16px; }
+        .auth-box input { width: 100%; padding: 12px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #333; background: #2a2826; color: #fff; }
+        .auth-box button { width: 100%; padding: 12px; background: #b8a090; border: none; border-radius: 8px; color: #fff; font-weight: bold; cursor: pointer; }
+        .auth-error { color: #c08070; margin-bottom: 10px; }
+        .auth-toggle { text-align: center; margin-top: 10px; color: #a09890; }
+        .auth-toggle button { background: none; border: none; color: #b8a090; cursor: pointer; }
+        .hidden { display: none; }
+        .card { background: #1e1c1a; padding: 16px; border-radius: 12px; margin-bottom: 12px; }
+        .post { background: #1e1c1a; padding: 14px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #2a2826; }
+        .post-user { font-weight: bold; color: #b8a090; }
+        .post-text { margin: 6px 0; }
+        .post-time { font-size: 11px; color: #6a6a6a; }
+        .btn { background: #b8a090; border: none; color: #fff; padding: 8px 20px; border-radius: 30px; cursor: pointer; }
+        .top-bar { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #2a2826; margin-bottom: 20px; }
+        .logo { font-size: 22px; font-weight: bold; }
+        .logo span { color: #b8a090; }
+    </style>
+</head>
+<body>
 
+<div class="app">
+    <div id="authSection">
+        <div class="auth-box">
+            <div class="logo">спокойный <span>ум</span></div>
+            <div class="auth-error" id="authError"></div>
+            <input type="text" id="authName" placeholder="имя" />
+            <input type="text" id="authUsername" placeholder="юзернейм" />
+            <input type="password" id="authPassword" placeholder="пароль" />
+            <button id="authSubmit">войти</button>
+            <div class="auth-toggle">
+                <span id="authToggleText">нет аккаунта?</span>
+                <button id="authToggleBtn">зарегистрироваться</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="mainSection" class="hidden">
+        <div class="top-bar">
+            <div class="logo">спокойный <span>ум</span></div>
+            <button class="btn" id="logoutBtn">выйти</button>
+        </div>
+
+        <div class="card">
+            <textarea id="postInput" placeholder="что у тебя внутри?" style="width:100%;padding:10px;border-radius:8px;border:1px solid #333;background:#2a2826;color:#fff;min-height:70px;"></textarea>
+            <button class="btn" id="postBtn" style="margin-top:8px;">опубликовать</button>
+        </div>
+
+        <div id="feedContainer">
+            <div style="text-align:center;color:#6a6a6a;padding:30px 0;">пока тихо</div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ============================================================
+// КОНЕЧНЫЙ РАБОЧИЙ ВАРИАНТ
+// ============================================================
+
+const API_URL = 'https://spokumbackend.onrender.com/api';
+let token = localStorage.getItem('token') || '';
+let currentUsername = '';
+
+function showToast(msg) {
+    alert(msg);
+}
+
+async function api(endpoint, method = 'GET', body = null) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const opt = { method, headers };
+    if (body) opt.body = JSON.stringify(body);
+    const res = await fetch(API_URL + endpoint, opt);
+    return await res.json();
+}
+
+// ---- АВТОРИЗАЦИЯ ----
+const authSection = document.getElementById('authSection');
+const mainSection = document.getElementById('mainSection');
+const authError = document.getElementById('authError');
+let isLogin = true;
+
+document.getElementById('authToggleBtn').addEventListener('click', () => {
+    isLogin = !isLogin;
+    document.getElementById('authToggleText').textContent = isLogin ? 'нет аккаунта?' : 'уже есть аккаунт?';
+    document.getElementById('authToggleBtn').textContent = isLogin ? 'зарегистрироваться' : 'войти';
+    document.getElementById('authSubmit').textContent = isLogin ? 'войти' : 'зарегистрироваться';
+    authError.textContent = '';
+});
+
+document.getElementById('authSubmit').addEventListener('click', async function() {
+    const name = document.getElementById('authName').value.trim();
+    const username = document.getElementById('authUsername').value.trim();
+    const password = document.getElementById('authPassword').value.trim();
+
+    if (!name || !password) {
+        authError.textContent = 'заполните имя и пароль';
+        return;
+    }
+
+    const finalUsername = username || name.toLowerCase().replace(/\s/g, '_');
+
+    if (isLogin) {
+        const res = await api('/login', 'POST', { login: finalUsername, password });
+        if (res && res.success) {
+            token = res.token;
+            currentUsername = res.user.username;
+            localStorage.setItem('token', token);
+            localStorage.setItem('calm_username', currentUsername);
+            authSection.style.display = 'none';
+            mainSection.classList.remove('hidden');
+            loadFeed();
+            showToast('добро пожаловать!');
+        } else {
+            authError.textContent = res?.message || 'ошибка входа';
+        }
+    } else {
+        const res = await api('/register', 'POST', {
+            username: finalUsername,
+            password: password,
+            display_name: name,
+            email: 'test@test.ru'
+        });
+        if (res && res.success) {
+            showToast('регистрация успешна! войдите.');
+            authError.textContent = '';
+            isLogin = true;
+            document.getElementById('authToggleText').textContent = 'нет аккаунта?';
+            document.getElementById('authToggleBtn').textContent = 'зарегистрироваться';
+            document.getElementById('authSubmit').textContent = 'войти';
+            document.getElementById('authName').value = '';
+            document.getElementById('authUsername').value = '';
+            document.getElementById('authPassword').value = '';
+        } else {
+            authError.textContent = res?.message || 'ошибка регистрации';
+        }
+    }
+});
+
+document.getElementById('logoutBtn').addEventListener('click', () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('calm_username');
+    token = '';
+    currentUsername = '';
+    location.reload();
+});
+
+// ---- ПОСТЫ ----
+document.getElementById('postBtn').addEventListener('click', async function() {
+    const text = document.getElementById('postInput').value.trim();
+    if (!text) { showToast('напиши что-нибудь'); return; }
+    const res = await api('/posts', 'POST', { text });
+    if (res && res.success) {
+        document.getElementById('postInput').value = '';
+        loadFeed();
+        showToast('опубликовано!');
+    } else {
+        showToast(res?.message || 'ошибка');
+    }
+});
+
+async function loadFeed() {
+    const container = document.getElementById('feedContainer');
+    const data = await api('/posts', 'GET');
+    if (!data || !data.length) {
+        container.innerHTML = `<div style="text-align:center;color:#6a6a6a;padding:30px 0;">пока тихо</div>`;
+        return;
+    }
+    let html = '';
+    data.forEach(p => {
+        html += `
+            <div class="post">
+                <div class="post-user">${p.username}</div>
+                <div class="post-text">${p.text}</div>
+                <div class="post-time">${new Date(p.time).toLocaleString()}</div>
+            </div>
+        `;
+    });
+    container.innerHTML = html;
+}
+
+// ---- ПРОВЕРКА АВТОРИЗАЦИИ ----
+if (localStorage.getItem('token') && localStorage.getItem('calm_username')) {
+    token = localStorage.getItem('token');
+    currentUsername = localStorage.getItem('calm_username');
+    authSection.style.display = 'none';
+    mainSection.classList.remove('hidden');
+    loadFeed();
+}
+</script>
+</body>
+</html>
