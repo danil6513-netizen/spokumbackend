@@ -5,7 +5,6 @@ import bcrypt
 import jwt
 import datetime
 import re
-import time
 import os
 
 app = Flask(__name__)
@@ -114,7 +113,7 @@ def get_user_by_username(username):
     conn.close()
     return user
 
-# ---- РЕГИСТРАЦИЯ (УПРОЩЁННАЯ) ----
+# ---- РЕГИСТРАЦИЯ (БЕЗ ВАЛИДАЦИИ) ----
 @app.route('/api/register', methods=['POST', 'OPTIONS'])
 def register():
     if request.method == 'OPTIONS':
@@ -124,16 +123,18 @@ def register():
     username = data.get('username', '').strip().lower()
     password = data.get('password', '')
     display_name = data.get('display_name', username)
-    email = data.get('email', '')
+    email = data.get('email', 'test@test.ru')
     
     if not username or not password:
-        return jsonify({"success": False, "message": "Заполните все поля"})
+        return jsonify({"success": False, "message": "Заполните имя и пароль"})
     
     if len(password) < 8:
         return jsonify({"success": False, "message": "Пароль минимум 8 символов"})
     
-    if not re.match(r'^[a-zA-Z0-9_]+$', username):
-        return jsonify({"success": False, "message": "Юзернейм: только латиница, цифры и _"})
+    # Юзернейм чистим от пробелов и спецсимволов
+    username = re.sub(r'[^a-zA-Z0-9_]', '', username)
+    if not username:
+        return jsonify({"success": False, "message": "Юзернейм только латиница"})
     
     conn = sqlite3.connect('social.db')
     cursor = conn.cursor()
@@ -142,7 +143,7 @@ def register():
         password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
         cursor.execute(
             "INSERT INTO users (username, password_hash, display_name, email) VALUES (?, ?, ?, ?)",
-            [username, password_hash, display_name, email or '']
+            [username, password_hash, display_name, email]
         )
         conn.commit()
         conn.close()
@@ -253,6 +254,10 @@ def create_post():
 
 if __name__ == '__main__':
     init_db()
+    print("🚀 Сервер запущен на http://localhost:5000")
+    print("📡 API доступны по адресу http://localhost:5000/api/...")
+    print("👤 Тестовые пользователи: alex/alex123, marina/marina123")
+    app.run(host='0.0.0.0', port=5000)
     print("🚀 Сервер запущен на http://localhost:5000")
     print("📡 API доступны по адресу http://localhost:5000/api/...")
     print("👤 Тестовые пользователи: alex/alex123, marina/marina123")
