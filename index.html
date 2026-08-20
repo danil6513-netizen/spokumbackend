@@ -22,6 +22,9 @@
         .top-bar { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #2a2826; margin-bottom: 20px; }
         .logo { font-size: 22px; font-weight: bold; }
         .logo span { color: #b8a090; }
+        .toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #1e1c1a; padding: 12px 24px; border-radius: 8px; border: 1px solid #333; z-index: 9999; }
+        .toast.success { border-color: #6aaa8a; }
+        .toast.error { border-color: #c08070; }
     </style>
 </head>
 <body>
@@ -61,15 +64,19 @@
 
 <script>
 // ============================================================
-// КОНЕЧНЫЙ РАБОЧИЙ ВАРИАНТ
+// ФИНАЛЬНЫЙ РАБОЧИЙ JS
 // ============================================================
 
 const API_URL = 'https://spokumbackend.onrender.com/api';
 let token = localStorage.getItem('token') || '';
 let currentUsername = '';
 
-function showToast(msg) {
-    alert(msg);
+function showToast(msg, type = 'info') {
+    const el = document.createElement('div');
+    el.className = 'toast ' + type;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
 }
 
 async function api(endpoint, method = 'GET', body = null) {
@@ -117,11 +124,12 @@ document.getElementById('authSubmit').addEventListener('click', async function()
             authSection.style.display = 'none';
             mainSection.classList.remove('hidden');
             loadFeed();
-            showToast('добро пожаловать!');
+            showToast('добро пожаловать!', 'success');
         } else {
             authError.textContent = res?.message || 'ошибка входа';
         }
     } else {
+        // РЕГИСТРАЦИЯ
         const res = await api('/register', 'POST', {
             username: finalUsername,
             password: password,
@@ -129,15 +137,27 @@ document.getElementById('authSubmit').addEventListener('click', async function()
             email: 'test@test.ru'
         });
         if (res && res.success) {
-            showToast('регистрация успешна! войдите.');
+            showToast('регистрация успешна! входим...', 'success');
             authError.textContent = '';
-            isLogin = true;
-            document.getElementById('authToggleText').textContent = 'нет аккаунта?';
-            document.getElementById('authToggleBtn').textContent = 'зарегистрироваться';
-            document.getElementById('authSubmit').textContent = 'войти';
-            document.getElementById('authName').value = '';
-            document.getElementById('authUsername').value = '';
-            document.getElementById('authPassword').value = '';
+            
+            // === АВТОМАТИЧЕСКИЙ ВХОД ПОСЛЕ РЕГИСТРАЦИИ ===
+            const loginRes = await api('/login', 'POST', { login: finalUsername, password });
+            if (loginRes && loginRes.success) {
+                token = loginRes.token;
+                currentUsername = loginRes.user.username;
+                localStorage.setItem('token', token);
+                localStorage.setItem('calm_username', currentUsername);
+                authSection.style.display = 'none';
+                mainSection.classList.remove('hidden');
+                loadFeed();
+                showToast('добро пожаловать!', 'success');
+            } else {
+                authError.textContent = 'ошибка автоматического входа, войдите вручную';
+                isLogin = true;
+                document.getElementById('authToggleText').textContent = 'нет аккаунта?';
+                document.getElementById('authToggleBtn').textContent = 'зарегистрироваться';
+                document.getElementById('authSubmit').textContent = 'войти';
+            }
         } else {
             authError.textContent = res?.message || 'ошибка регистрации';
         }
@@ -155,14 +175,14 @@ document.getElementById('logoutBtn').addEventListener('click', () => {
 // ---- ПОСТЫ ----
 document.getElementById('postBtn').addEventListener('click', async function() {
     const text = document.getElementById('postInput').value.trim();
-    if (!text) { showToast('напиши что-нибудь'); return; }
+    if (!text) { showToast('напиши что-нибудь', 'error'); return; }
     const res = await api('/posts', 'POST', { text });
     if (res && res.success) {
         document.getElementById('postInput').value = '';
         loadFeed();
-        showToast('опубликовано!');
+        showToast('опубликовано!', 'success');
     } else {
-        showToast(res?.message || 'ошибка');
+        showToast(res?.message || 'ошибка', 'error');
     }
 });
 
